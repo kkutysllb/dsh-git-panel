@@ -52,6 +52,7 @@ if (HAS_CLIENT) {
 // 4) cordis.patch.yml name 指向
 const patch = src('cordis.patch.yml') ?? ''
 ok('patch name 指向新包名', patch.includes("name: '" + PKG_NAME + "'") || patch.includes('name: "' + PKG_NAME + '"'))
+ok('YAML 无裸 @ 值（patch 行，@ 为 anchor 保留字须引号）', !/:\s+@/.test(patch))
 
 // 5) 旧名/旧锚点零残留（scripts/release 不属于交付面，豁免）
 const legacy = ['@kcoder/git-panel', '@kcoder/stats-panel', '@kcoder/terminal',

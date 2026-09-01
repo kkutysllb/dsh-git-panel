@@ -10,5 +10,5 @@
 # 覆写或禁用本行。
 
 - insert:
-    - id: @dsh-external/dsh-git-panel
+    - id: '@dsh-external/dsh-git-panel'
       name: '@dsh-external/dsh-git-panel'
