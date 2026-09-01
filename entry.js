@@ -1,5 +1,5 @@
 /**
- * dsh-git-panel — server 半（dsh web 插件，cordis patch 层挂载）。
+ * @dsh-external/dsh-git-panel — server 半（dsh web 插件，cordis patch 层挂载）。
  *
  * 只读 git 工作区快照 RPC：
  * - POST /dsh-git-panel/api/snapshot  {cwd}  → GitSnapshot
@@ -16,7 +16,7 @@
  * 直跑覆盖（真 git 临时仓库集成用例）。逻辑平移自退役宿主
  * desktop/main/git-panel.ts，语义保持一致。
  *
- * @module dsh-git-panel/entry
+ * @module @dsh-external/dsh-git-panel/entry
  */
 
 import { execFile } from 'node:child_process'

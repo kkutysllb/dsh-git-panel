@@ -1,5 +1,5 @@
 /**
- * dsh-git-panel — client 半（shell 页面内独立浮动面板）。
+ * @dsh-external/dsh-git-panel — client 半（shell 页面内独立浮动面板）。
  *
  * 交付形态：dsh client-modules 按 package.json 的 dsh.client 声明把本
  * 文件作为 `exports["./client"]` bundle 读入，经 /plugins combo 路由以
@@ -25,11 +25,11 @@
  * - 开关按钮 id __dsh_kc_git_btn / 位置 right:108px（旧宿主按钮
  *   __dsh_desktop_git_btn 已随宿主退役同步摘除，本按钮接替原位）。
  *
- * @module dsh-git-panel/client
+ * @module @dsh-external/dsh-git-panel/client
  */
 
 window.__ModuleLoader__.load({
-  id: 'dsh-git-panel',
+  id: '@dsh-external/dsh-git-panel',
   factory: () => {
     const exports = {}
 

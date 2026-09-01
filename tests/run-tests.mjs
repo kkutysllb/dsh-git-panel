@@ -1,5 +1,5 @@
 /**
- * dsh-git-panel 单测（node 直跑，零依赖）：
+ * @dsh-external/dsh-git-panel 单测（node 直跑，零依赖）：
  *
  *   node bundle/dsh-git-panel/tests/run-tests.mjs
  *

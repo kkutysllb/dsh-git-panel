@@ -1,4 +1,4 @@
-# dsh-git-panel
+# @dsh-external/dsh-git-panel
 
 > **独立 git 工作区面板**——server 只读 git 快照 RPC（`/dsh-git-panel/api/snapshot` 与 open-plan 回退）+ client 页面内浮动面板（分支/工作区/计划视图），注册进侧边栏 Tab 体系。原 KCoder 桌面端宿主 git-panel 的插件化整体替代。
 
@@ -7,7 +7,7 @@
 ## 安装
 
 ```bash
-dsh plugin install dsh-git-panel
+dsh plugin install @dsh-external/dsh-git-panel
 ```
 
 ## 形态
