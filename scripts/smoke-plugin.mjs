@@ -13,7 +13,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
-const PKG_NAME = '@dsh-external/dsh-git-panel'
+const PKG_NAME = '@kkutysllb/dsh-git-panel'
 const HAS_CLIENT = true
 const INTACT = []
 const KEEP_LEGACY = [] // 跨层持久化协议锚点（豁免旧名残留检查）
