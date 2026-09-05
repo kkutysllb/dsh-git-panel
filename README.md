@@ -4,11 +4,39 @@
 
 自 KCoder 内置包独立发布的 dsh 插件（v1.0.0 起独立版本线）。
 
-## 安装
+## 安装 / Install
 
 ```bash
-dsh plugin install @kkutysllb/dsh-git-panel
+# npm registry（推荐：版本可被插件管理检测，用户手动更新）
+# npm registry (recommended: version detection with manual updates)
+dsh plugin --profile web add @kkutysllb/dsh-git-panel
+
+# GitHub 直装 / install straight from GitHub
+dsh plugin --profile web add github:kkutysllb/dsh-git-panel
+
+# 或从 dsh-plugins 真源仓 / or from the dsh-plugins monorepo
+dsh plugin --profile web add github:kkutysllb/dsh-plugins#dsh-git-panel
 ```
+
+装好后重启 web profile 即生效：标题栏出现「git 工作区」开关按钮（非 git
+工作区置灰），页面内注册独立浮动面板——变更/工作位置/分支、提交或推送、
+比较分支外链、GitHub 管理（PR/Issue）、任务计划；多窗口各自跟随自己的
+会话工作区。gh 管理能力需本机装有 [gh CLI](https://cli.github.com) 并
+`gh auth login`（缺席仅降级 GitHub 区块，其余功能不受影响）。
+
+After install, restart the web profile: a "git workspace" toggle appears in
+the titlebar (dimmed outside a git workspace) and an independent floating
+panel registers in-page — changes/worktrees/branches, commit & push,
+compare link, GitHub management (PR/Issue), task plans; each window follows
+its own session workspace. The GitHub section needs the
+[gh CLI](https://cli.github.com) installed and `gh auth login`; without it
+only that section degrades.
+
+每个版本的变更说明（新增 / 变更 / 修复）见 [`release/`](release/)；
+`package.json` 的 `version` 是插件管理检测新版本的信号，更新由用户手动触发。
+
+Per-version changes (added / changed / fixed) live under
+[`release/`](release/); the `package.json` version drives update detection.
 
 ## 形态
 
