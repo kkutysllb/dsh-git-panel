@@ -479,7 +479,9 @@ window.__ModuleLoader__.load({
         }
       }
       const applyBodyMutations = () => { applySidebarMutual(); applySettingsYield() }
-      new MutationObserver(applyBodyMutations).observe(document.body, {
+      // 具名 observer：卸载收口需要 disconnect（运行时停用/HMR）
+      const bodyMo = new MutationObserver(applyBodyMutations)
+      bodyMo.observe(document.body, {
         subtree: true, childList: true, attributes: true, attributeFilter: ['class'],
       })
 
@@ -955,14 +957,16 @@ window.__ModuleLoader__.load({
       doCommitBtn.onclick = () => { void doCommit() }
       doPushBtn.onclick = () => { void doPush() }
 
-      // flyout 外点击关闭（行自身点击由 onclick 接管切换）
-      document.addEventListener('mousedown', (ev) => {
+      // flyout 外点击关闭（行自身点击由 onclick 接管切换）；具名监听供卸载移除
+      const onDocMouseDown = (ev) => {
         if (flyMode === null) return
         if (fly.contains(ev.target)) return
         if (ev.target instanceof Element && ev.target.closest('#' + PANEL_ID + ' .gt-row') !== null) return
         closeFly()
-      })
-      document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closeFly() })
+      }
+      const onDocKeyDown = (ev) => { if (ev.key === 'Escape') closeFly() }
+      document.addEventListener('mousedown', onDocMouseDown)
+      document.addEventListener('keydown', onDocKeyDown)
 
       /* ---- 渲染（git.ts render 平移） ---- */
       function render(s) {
@@ -1086,7 +1090,8 @@ window.__ModuleLoader__.load({
         renderBadge()
         return true
       }
-      setInterval(() => { injectBtn() }, 500)
+      // 具名常驻自愈轮询：卸载收口需要 clearInterval（运行时停用/HMR）
+      const keepAlive = setInterval(() => { injectBtn() }, 500)
 
       closeBtn.onclick = () => { yielded = false; settingsYielded = false; setOpen(false) } // 手动清义务
       refreshBtn.onclick = () => { ghCache = null; void refresh() }
@@ -1098,6 +1103,30 @@ window.__ModuleLoader__.load({
       // 启动：收起态 + 降频轮询（徽章保活），首拉立即
       void refresh()
       schedule()
+
+      /* ---- 卸载收口（运行时停用/HMR：轮询/监听/注入 DOM 全量还原，
+       * 布局让位清零，Wired 守卫复位以便重挂载） ---- */
+      const teardown = () => {
+        clearInterval(timer)
+        clearInterval(keepAlive)
+        bodyMo.disconnect()
+        document.removeEventListener('mousedown', onDocMouseDown)
+        document.removeEventListener('keydown', onDocKeyDown)
+        try { setPad(0) } catch { /* noop */ }
+        document.documentElement.style.removeProperty('--dsh-git-inset')
+        panel.remove()
+        fly.remove()
+        style.remove()
+        const btn = document.getElementById(BTN_ID)
+        if (btn !== null) btn.remove()
+        delete window.__dshGitPanelOpen
+        delete window.__dshGitPanelToggle
+        delete window.__dshKcGitWired
+      }
+      if (typeof ctx.effect === 'function') {
+        // client-modules 工厂 ctx：停用/热替换时随 fiber 调用 disposer。
+        ctx.effect(() => teardown, 'dsh-git-panel: client wiring')
+      }
     }
 
     return exports
