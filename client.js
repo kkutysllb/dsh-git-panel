@@ -60,8 +60,16 @@ window.__ModuleLoader__.load({
       const PANEL_MIN_H = 200
       /** 内容区让位宽度（面板宽 + 双倍 margin）。 */
       const PAD_W = 384
-      /** 标题栏按钮宿主（theme-watcher 注入）。 */
+      /** 标题栏按钮宿主（theme-watcher 注入；仅 KCoder/QiLin 桌面壳有）。 */
       const TITLEBAR_ID = '__dsh_desktop_titlebar'
+      /** 原生壳按钮回退锚：会话头右上角席位（slot 工具化 DOM）。 */
+      const CORNER_SLOT = 'conversation.session.header.corner'
+      /** 侧栏会话行的 DOM order key 前缀（ui-workspace Rows.tsx 稳定事实）。 */
+      const SESSION_ROW_PREFIX = 'session:'
+      /** 会话选择持久键（ui-workspace selection store 的 persist 名）。 */
+      const SESSION_STORE_KEY = 'dsh.sessions.current'
+      /** 原生右栏列结构锚（ui-layout AppFrame 第三列轨道）。 */
+      const RIGHTBAR_COL_SEL = '[data-rightbar-col]'
 
       // 空快照（挂载后第一次拉取前）
       const EMPTY = {
@@ -144,7 +152,12 @@ window.__ModuleLoader__.load({
         // 标题栏按钮（旧宿主同款视觉与位置；旧按钮已随宿主退役接替原位）。
         // 关键：bar 是 -webkit-app-region:drag 拖拽区（theme-watcher），
         // 按钮必须显式 no-drag，否则点击被窗口拖拽吞掉（DOM 无 click）。
-        '#' + BTN_ID + '{all:unset;box-sizing:border-box;position:absolute;right:108px;top:50%;transform:translateY(-50%);display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:7px;cursor:pointer;color:rgba(26,29,33,.65);-webkit-app-region:no-drag;transition:background .15s ease}',
+        // 位形 1（宿主自绘标题栏：KCoder/QiLin 桌面壳主进程注入的
+        // #__dsh_desktop_titlebar）：绝对定位接替退役宿主原位。
+        '#' + BTN_ID + ':not(.gt-corner){all:unset;box-sizing:border-box;position:absolute;right:108px;top:50%;transform:translateY(-50%);display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:7px;cursor:pointer;color:rgba(26,29,33,.65);-webkit-app-region:no-drag;pointer-events:auto;transition:background .15s ease}',
+        // 位形 2（原生 dsh 壳的会话头 corner 席位）：随会话头行内排布，
+        // 28px 与邻居 icon 按钮齐平；头行整体是窗口拖拽区 → no-drag 同款。
+        '#' + BTN_ID + '.gt-corner{all:unset;box-sizing:border-box;position:relative;display:inline-flex;align-items:center;justify-content:center;flex:none;width:28px;height:28px;margin-left:6px;border-radius:7px;cursor:pointer;color:currentColor;opacity:.75;-webkit-app-region:no-drag;pointer-events:auto;transition:background .15s ease,opacity .15s ease}',
         '#' + BTN_ID + ':hover{background:rgba(128,128,128,.16);color:rgba(26,29,33,.9)}',
         '#' + BTN_ID + '[data-on="1"]{background:rgba(47,111,237,.14);color:#2F6FED}',
         'body[data-ds-dark-theme] #' + BTN_ID + '{color:rgba(232,234,237,.6)}',
@@ -160,6 +173,10 @@ window.__ModuleLoader__.load({
         '#' + BTN_ID + ' .bdg .d{padding:0 4px;background:#CF222E}',
         'body[data-ds-dark-theme] #' + BTN_ID + ' .bdg .a{background:#238636}',
         'body[data-ds-dark-theme] #' + BTN_ID + ' .bdg .d{background:#DA3633}',
+        // corner 位形贴着会话头右缘，徽章内收一点防裁切
+        '#' + BTN_ID + '.gt-corner .bdg{top:-4px;right:-4px}',
+        '#' + BTN_ID + '.gt-corner:hover{opacity:1}',
+        '#' + BTN_ID + '.gt-corner.dim{opacity:.4}',
         // ---- 环境信息行（Codex 风格行布局） ----
         '#' + PANEL_ID + ' .gt-row{all:unset;box-sizing:border-box;display:flex;align-items:center;gap:8px;width:100%;padding:6px 8px;border-radius:7px;cursor:pointer}',
         '#' + PANEL_ID + ' .gt-row:hover{background:var(--gt-hover)}',
@@ -351,17 +368,58 @@ window.__ModuleLoader__.load({
         body: JSON.stringify(payload || {}),
       }).then(r => r.text()).then(t => JSON.parse(t))
 
-      // cwd 按当前会话现场读取（多窗口各跟随各的工作区；切会话随轮询生效）
-      const currentCwd = () => {
+      /* ---- 当前会话 / cwd（多窗口各跟随各的工作区） ----
+       * 0.2.x 起「当前会话」不在 sessions 列表快照里：SessionListState 只有
+       * ids/byId/phase/projectionsBySession（`current` 自 0.1.6-alpha.2 起被
+       * 移除，选择归 ui-workspace 的私有 selection store）。故按可靠性三级
+       * 取 id，任一级命中即用 byId 读 cwd：
+       *   ① 列表快照的 current（≤0.1.5 老宿主遗留）；
+       *   ② 侧栏当前会话行 [data-row-key^="session:"][aria-selected="true"]
+       *      （ui-workspace Rows.tsx 的稳定 DOM 事实，切会话即时跟随）；
+       *   ③ 选择持久值 localStorage['dsh.sessions.current']（selection store
+       *      的 persist 名，形如 {sessionId}）。
+       * 三级全空（hero/设置页/首次启动）→ null，面板走「等待工作区」空态；
+       * 列表瞬时刷新造成的短暂取不到沿用上次解析结果，不闪空态。 */
+      const sessionList = () => {
+        try { return ctx.get('sessions')?.list?.getSnapshot?.() ?? null } catch { return null }
+      }
+      const currentSessionId = () => {
+        const legacy = sessionList()?.current
+        if (typeof legacy === 'string' && legacy !== '') return legacy
         try {
-          const snap = ctx.get('sessions')?.list?.getSnapshot?.()
-          const cur = snap?.current
-          if (cur === undefined || cur === null) return null
-          return snap?.byId?.[cur]?.cwd ?? null
-        } catch { return null }
+          const row = document.querySelector('[data-row-key^="' + SESSION_ROW_PREFIX + '"][aria-selected="true"]')
+          const key = row === null ? null : row.getAttribute('data-row-key')
+          if (typeof key === 'string' && key.length > SESSION_ROW_PREFIX.length) {
+            return key.slice(SESSION_ROW_PREFIX.length)
+          }
+        } catch { /* 特殊文档态：静默降级到下一级 */ }
+        try {
+          const raw = window.localStorage.getItem(SESSION_STORE_KEY)
+          if (raw !== null) {
+            const saved = JSON.parse(raw)
+            if (typeof saved?.sessionId === 'string' && saved.sessionId !== '') return saved.sessionId
+          }
+        } catch { /* 隐私模式/坏值：当作取不到 */ }
+        return null
+      }
+      /** 上次成功解析的 {id, cwd}：瞬时取不到时粘性回退，不闪空态。 */
+      let lastCwd = null
+      const currentCwd = () => {
+        const snap = sessionList()
+        const id = currentSessionId()
+        const cwd = id === null ? null : (snap?.byId?.[id]?.cwd ?? null)
+        if (typeof cwd === 'string' && cwd !== '') {
+          lastCwd = { id, cwd }
+          return cwd
+        }
+        if (lastCwd !== null && (id === null || id === lastCwd.id)) return lastCwd.cwd
+        return null
       }
 
+      /** 在途序号：切会话/手动刷新并发时，旧响应不得覆盖新响应。 */
+      let refreshSeq = 0
       const refresh = async () => {
+        const seq = ++refreshSeq
         const cwd = effectiveCwd()
         if (cwd === null || cwd === '') {
           snapshot = EMPTY
@@ -369,6 +427,7 @@ window.__ModuleLoader__.load({
           try {
             snapshot = await api('snapshot', { cwd })
           } catch { return /* 网络/重启间隙：保旧快照 */ }
+          if (seq !== refreshSeq) return /* 已有更新的请求在途：丢弃本次结果 */
         }
         render(snapshot)
         renderBadge()
@@ -383,11 +442,68 @@ window.__ModuleLoader__.load({
       // 内容区右侧让位（面板开时给正文让出 PAD_W；W=0 清除）
       const setPad = (w) => {
         document.documentElement.style.setProperty('--dsh-git-inset', w > 0 ? w + 'px' : '0px')
-        const cols = document.querySelectorAll('[class*="centerCol"], [class*="detailsCol"]')
+        // 只缩中心列：原生右栏不再内缩——它与本浮层改成几何互避（见 panelRight）
+        const cols = document.querySelectorAll('[class*="centerCol"]')
         for (const c of cols) {
           if (w > 0) c.style.paddingRight = w + 'px'
           else c.style.removeProperty('padding-right')
         }
+      }
+
+      /* ---- 与原生右边栏几何互避（展开左移 / 收起回右缘，非互斥收起） ----
+       * 原生右栏是 AppFrame 的第三列轨道 [data-rightbar-col]：展开时它占掉帧右缘
+       * 的 rightbarMax，收起时轨道宽 0（data-rightbar-collapsed）。本面板是
+       * fixed 浮层，展开时贴右缘会整个压住它（旧版把右栏自身内缩，实测无效且
+       * 会切掉其内容）。改按轨道**实测宽度**整体左移：拖拽调宽也跟随；收起即回
+       * 右缘。全屏态（data-rightbar-fullscreen，右栏铺满帧）无处可避，维持右缘。
+       * 窄窗兜底：至少给面板留 PANEL_W，免被挤出屏。 */
+      const nativeRightbarService = () => {
+        try {
+          const sb = ctx.get('sidebarRight')
+          if (sb === null || sb === undefined) return null
+          if (typeof sb.isExpanded !== 'function' || typeof sb.toggleExpanded !== 'function') return null
+          return sb
+        } catch { return null }
+      }
+      /** 原生右栏（ui-sidebar-right）是否展开：服务优先，DOM 轨道宽度兜底。 */
+      const nativeRightbarOpen = () => {
+        const sb = nativeRightbarService()
+        if (sb !== null) {
+          try { return sb.isExpanded() === true } catch { /* 退回 DOM */ }
+        }
+        const col = document.querySelector(RIGHTBAR_COL_SEL)
+        return col !== null && col.getBoundingClientRect().width > 1
+      }
+      /**
+       * 收起/展开原生右栏（正向让位用）。
+       * @returns 是否真的动了它（false = 无法控制 → 调用方退回几何互避）
+       */
+      const setNativeRightbar = (next) => {
+        const sb = nativeRightbarService()
+        if (sb === null) return false
+        try {
+          if (sb.isExpanded() !== next) sb.toggleExpanded()
+          return true
+        } catch { return false }
+      }
+
+      const panelRight = () => {
+        const col = document.querySelector(RIGHTBAR_COL_SEL)
+        if (col === null) return PANEL_MARGIN
+        const frame = col.parentElement
+        if (frame !== null && frame.hasAttribute('data-rightbar-fullscreen')) return PANEL_MARGIN
+        const w = col.getBoundingClientRect().width
+        if (!(w > 1)) return PANEL_MARGIN
+        const desired = Math.round(w) + PANEL_MARGIN
+        const limit = Math.max(PANEL_MARGIN, window.innerWidth - PANEL_W)
+        return Math.min(desired, limit)
+      }
+      let lastRight = -1
+      const applyGeometry = () => {
+        const right = panelRight()
+        if (right === lastRight) return
+        lastRight = right
+        panel.style.right = right + 'px'
       }
 
       const setOpen = (next) => {
@@ -400,29 +516,37 @@ window.__ModuleLoader__.load({
         }
         renderBadge()
         setPad(open ? PAD_W : 0)
+        applyGeometry() // 展开前先按原生右栏实况落位（收起态也不影响）
         schedule()
         if (open) {
-          // 正向让位：侧边栏开着则收起避让（收起沿会触发 observer，
-          // 反向义务 yielded=false 无动作，无环）
-          if (!sideYielded && betterSidebarOpen()) {
-            sideYielded = true
-            setSidebarPanel(false)
+          // 正向让位：哪类侧栏开着就收哪类（收起沿会触发 observer，反向义务
+          // yielded=false 无动作，无环）。收不动（老宿主无服务/DOM 控件）不留
+          // 义务——那种情形交给几何互避兜底。
+          if (sideYielded === null) {
+            if (betterSidebarOpen() && setSidebarPanel(false)) sideYielded = 'better'
+            else if (nativeRightbarOpen() && setNativeRightbar(false)) sideYielded = 'native'
           }
           void refresh()
-        } else if (sideYielded) {
-          // 履约：手动关闭时把当初让位收起的侧边栏开回（反向让位收起
-          // 路径在 observer 里已先清 sideYielded，不会误履约）
-          sideYielded = false
-          setSidebarPanel(true)
+        } else if (sideYielded !== null) {
+          // 履约：手动关闭时把当初让位收起的侧栏开回（反向让位路径在 observer
+          // 里已先清 sideYielded，不会误履约）
+          const restore = sideYielded
+          sideYielded = null
+          if (restore === 'better') setSidebarPanel(true)
+          else setNativeRightbar(true)
         }
       }
 
-      /* ---- 互斥让位（旧宿主 sidebar-cluster 协议平移）：
-         better-sidebar 面板展开 → git 卡片收起（预览落地见缝）；侧边栏
-         收起 → 履约恢复。沿判定（翻转才动作）天然去重；host 缺席 =
-         插件未装视为关。仅让位收起带恢复义务，手动开关不被抢。 ---- */
-      let yielded = false // 反向义务：git 因侧边栏让位而收起（收起沿恢复）
-      let sideYielded = false // 正向义务：git 开启时收了侧边栏（手动关时开回）
+      /* ---- 互斥让位（双向；原生右栏 + better-sidebar 两源） ----
+       * 反向：任一侧栏展开 → git 卡片收起；侧栏收起 → 履约恢复（仅「因让位
+       *   而收起」才恢复，用户手动开头/关尾不参与义务）。
+       * 正向：git 卡片开启 → 开着的侧栏收起避让；git 手动关闭 → 履约开回。
+       * 原生右栏优先走 ctx.sidebarRight 服务（isExpanded / toggleExpanded）；
+       * 服务缺席或不给控（老宿主）时正向不动它，退化为几何互避（panelRight
+       * 按轨道实测宽度把浮层左移），届时两者至少不重叠。
+       * 沿判定（翻转才动作）天然去重；host 缺席 = 插件未装视为关。 ---- */
+      let yielded = false // 反向义务：git 因侧栏让位而收起（收起沿恢复）
+      let sideYielded = null // 正向义务：因 git 开启而被收起的侧栏（'better' | 'native' | null）
       const betterSidebarOpen = () => {
         const host = document.querySelector('[data-dsh-better-sidebar]')
         if (host === null) return false
@@ -440,14 +564,16 @@ window.__ModuleLoader__.load({
         return btn !== null
       }
       let lastSidebarOpen = null // null = 初始态，不当沿
+      /** 任一侧栏占用者是否展开（原生右栏 / better-sidebar）。 */
+      const anySideOpen = () => betterSidebarOpen() || nativeRightbarOpen()
       const applySidebarMutual = () => {
-        const sbOpen = betterSidebarOpen()
+        const sbOpen = anySideOpen()
         if (lastSidebarOpen === null) { lastSidebarOpen = sbOpen; return }
         if (sbOpen === lastSidebarOpen) return
         lastSidebarOpen = sbOpen
         if (sbOpen) {
           if (open) {
-            sideYielded = false // 正向义务随反向让位解除，防交叉残留
+            sideYielded = null // 正向义务随反向让位解除，防交叉残留
             yielded = true
             setOpen(false)
           }
@@ -478,11 +604,33 @@ window.__ModuleLoader__.load({
           setOpen(true)
         }
       }
+      /* 会话切换跟随：行内选中态（aria-selected）是当前会话的唯一 DOM 事实
+       * （ui-workspace Rows.tsx），翻转即立即重拉，不等下一拍轮询。 */
+      let lastSessionId = null
+      const applySessionFollow = () => {
+        const id = currentSessionId()
+        if (id === lastSessionId) return
+        lastSessionId = id
+        void refresh()
+      }
       const applyBodyMutations = () => { applySidebarMutual(); applySettingsYield() }
-      // 具名 observer：卸载收口需要 disconnect（运行时停用/HMR）
-      const bodyMo = new MutationObserver(applyBodyMutations)
+      // 具名 observer：卸载收口需要 disconnect（运行时停用/HMR）。只把
+      // aria-selected 当「会话切换」信号；class 抖动（流式渲染高频）不进
+      // 跟随判定，避免每条消息都触发一次重拉。
+      const bodyMo = new MutationObserver((records) => {
+        for (const rec of records) {
+          if (rec.type !== 'attributes') continue
+          if (rec.attributeName === 'aria-selected') { applySessionFollow(); continue }
+          // 原生右栏轨道/全屏态翻转：立即重算浮层落位（不等 500ms 心跳）
+          if (rec.attributeName === 'data-rightbar-collapsed' || rec.attributeName === 'data-rightbar-fullscreen') {
+            applyGeometry()
+          }
+        }
+        applyBodyMutations()
+      })
       bodyMo.observe(document.body, {
-        subtree: true, childList: true, attributes: true, attributeFilter: ['class'],
+        subtree: true, childList: true, attributes: true,
+        attributeFilter: ['class', 'aria-selected', 'data-rightbar-collapsed', 'data-rightbar-fullscreen'],
       })
 
       /* ---- 计划点击预览（软依赖三层）：
@@ -1039,7 +1187,7 @@ window.__ModuleLoader__.load({
           empty.append(el('div', '', '「' + s.workspace + '」不是 git 仓库'))
         } else if (!hasPlans) {
           empty.append(el('div', '', '暂无任务计划文档'))
-          empty.append(el('div', 'gt-hint', '约定位置：plans/ · docs/plans/ · .plans/ · plan.md'))
+          empty.append(el('div', 'gt-hint', '约定位置（递归任意层级）：plans/ · .plans/ · plan.md'))
         }
         const hasEmpty = empty.childNodes.length > 0
         empty.style.display = hasEmpty ? '' : 'none'
@@ -1075,23 +1223,66 @@ window.__ModuleLoader__.load({
         }
       }
 
-      /* ---- 标题栏按钮（旧宿主 PAGE_JS 注入协议平移 + 图标改 git-branch；
-         SPA 内 titlebar 可能重挂，低频轮询永续自愈） ---- */
+      /* ---- 开关按钮锚点链（纯 DOM，不引入上游 slot 依赖） ----
+       * 锚点 1（首选）：[data-slot="conversation.session.header.corner"]
+       *   ——会话头右上角席位（slot 工具化 DOM，display:contents 包装），
+       *   兜底选择器 [data-conversation-header-corner]；行内 28px、与邻居
+       *   icon 按钮齐平、no-drag、色随头行 currentColor。
+       * 锚点 2（兜底）：#__dsh_desktop_titlebar——KCoder/QiLin 桌面壳主进程
+       *   注入（theme-watcher / titlebar.mjs）的自绘标题栏带；hero/设置页无
+       *   会话头时按钮回落到带上（固定 right:108px 绝对定位）。
+       * v1.0.x 只认锚点 2：原生 dsh 壳没有该元素 → 按钮永不出现（面板不可达）。
+       * 会话头仅会话页渲染（hero/设置页无 corner）→ 按钮随路由在两种锚点间
+       *   迁移属预期；500ms 巡逻负责落位、迁位与整表重写后的自愈。 ---- */
+      const cornerHost = () =>
+        document.querySelector('[data-slot="' + CORNER_SLOT + '"]')
+        ?? document.querySelector('[data-conversation-header-corner]')
+      /* 锚点优先级：会话头 corner 优先，标题栏带仅作兜底。
+       * 理由（2026-10-10 真机）：KCoder 桌面壳把会话页头**覆盖进**自绘标题栏
+       * 同一条 48px 带（页头 z 2147483647 > 条 z 2147483646），带内右侧已被
+       * 原生按钮占位（本地编辑器选择 / 远程 SSH）。标题栏位形是固定
+       * right:108px 的绝对定位，会压住它们；corner 是会话头自己的行内末席
+       * （页头排布已为右侧原生按钮带留出空间），既不重叠也不吃别家按钮。 */
+      const preferredHost = () => {
+        const corner = cornerHost()
+        if (corner !== null) return { host: corner, corner: true }
+        const bar = document.getElementById(TITLEBAR_ID)
+        if (bar !== null) return { host: bar, corner: false }
+        return null
+      }
       const injectBtn = () => {
-        const host = document.getElementById(TITLEBAR_ID)
-        if (host === null) return false
-        if (document.getElementById(BTN_ID) !== null) return true
-        const btn = document.createElement('button')
-        btn.id = BTN_ID
-        btn.title = 'git 工作区'
-        btn.innerHTML = SVG.branch
-        btn.onclick = () => { yielded = false; settingsYielded = false; setOpen(!open) } // 手动清义务
-        host.append(btn)
-        renderBadge()
+        const pick = preferredHost()
+        if (pick === null) return false
+        let btn = document.getElementById(BTN_ID)
+        let fresh = false
+        if (btn === null) {
+          btn = document.createElement('button')
+          btn.id = BTN_ID
+          btn.title = 'git 工作区'
+          btn.innerHTML = SVG.branch
+          btn.onclick = () => { yielded = false; settingsYielded = false; setOpen(!open) } // 手动清义务
+          pick.host.append(btn)
+          fresh = true
+        } else if (btn.parentElement !== pick.host) {
+          pick.host.append(btn) // 锚点迁移（会话页↔hero/设置页、宿主整表重写）
+          fresh = true
+        }
+        // 位形随锚点：corner 走 .gt-corner（行内 28px），标题栏带绝对定位。
+        // 巡逻只在按钮新建/迁位时重绘徽章——500ms 心跳不该重建 DOM。
+        if (btn.classList.contains('gt-corner') !== pick.corner) {
+          btn.classList.toggle('gt-corner', pick.corner)
+          fresh = true
+        }
+        if (fresh) renderBadge()
         return true
       }
-      // 具名常驻自愈轮询：卸载收口需要 clearInterval（运行时停用/HMR）
-      const keepAlive = setInterval(() => { injectBtn() }, 500)
+      // 具名常驻自愈轮询：卸载收口需要 clearInterval（运行时停用/HMR）。
+      // 兼作几何跟随：原生右栏拖拽调宽只改轨道宽度、无属性事件，靠这一拍实测。
+      const keepAlive = setInterval(() => {
+        injectBtn()
+        if (open) applyGeometry()
+        applySidebarMutual() // 沿判定幂等：服务侧翻转（无 DOM 属性事件）也跟得上
+      }, 500)
 
       closeBtn.onclick = () => { yielded = false; settingsYielded = false; setOpen(false) } // 手动清义务
       refreshBtn.onclick = () => { ghCache = null; void refresh() }

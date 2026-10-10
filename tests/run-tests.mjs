@@ -333,6 +333,33 @@ if (await gitAvailable()) {
     assert.ok(root.path.startsWith('/'))
   })
 
+  await test('scanPlans：递归次级目录（计划目录子树/嵌套 plans/任意层级 plan.md/跳过噪声）', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-git-panel-plans-deep-'))
+    const base = Date.now() - 50_000
+    const write = async (rel, text, mtimeMs) => {
+      const p = join(dir, rel)
+      await mkdir(join(p, '..'), { recursive: true })
+      await writeFile(p, text)
+      const d = new Date(mtimeMs)
+      await utimes(p, d, d)
+      return p
+    }
+    await write('plans/sub/deep.md', '# Deep Plan\n', base + 5000)             // 计划目录子树
+    await write('packages/foo/plans/pkg.md', '# Pkg Plan\n', base + 4000)     // 次级目录里的计划目录
+    await write('.plans/hidden.md', '# Hidden Plan\n', base + 3000)           // 隐藏约定目录
+    await write('packages/bar/plan.md', '# Nested Root Plan\n', base + 2000)  // 任意层级 plan.md
+    await write('node_modules/plans/noise.md', '# Noise\n', base + 9000)      // 噪声目录必须跳过
+    await write('plans/README.txt', 'not markdown\n', base + 9000)            // 非 .md 不收
+
+    const titles = (await scanPlans(dir)).map(p => p.title)
+    assert.equal(titles.includes('Deep Plan'), true)
+    assert.equal(titles.includes('Pkg Plan'), true)
+    assert.equal(titles.includes('Hidden Plan'), true)
+    assert.equal(titles.includes('Nested Root Plan'), true)
+    assert.equal(titles.includes('Noise'), false)
+    assert.equal(titles.includes('README'), false)
+  })
+
   await test('probeWorkspace：计划扫描并入快照', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'dsh-git-panel-snap-'))
     await execFileP('git', ['init'], dir)

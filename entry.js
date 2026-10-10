@@ -52,10 +52,22 @@ const GH_TIMEOUT_MS = 20000
 const FILES_MAX = 200
 /** 计划列表上限（按 mtime 新→旧截断）。 */
 const PLAN_MAX = 6
-/** 计划文档约定目录（一层 .md）。 */
-const PLAN_DIRS = ['plans', 'docs/plans', '.plans']
-/** 计划文档约定文件（工作区根）。 */
+/** 计划文档约定文件名（工作区根，或任意层级的同名文件；大小写不敏感）。 */
 const PLAN_FILES = ['plan.md', 'PLAN.md', 'docs/plan.md']
+/** 计划目录名：任意层级的约定目录，其子树下的 .md 全收。 */
+const PLAN_DIR_NAMES = new Set(['plans', '.plans'])
+/** 递归扫描跳过的目录（依赖/构建产物/缓存/链接 worktree，进去只会白跑）。 */
+const PLAN_SKIP_DIRS = new Set([
+  'node_modules', '.git', 'dist', 'build', 'out', 'coverage', 'vendor', 'target',
+  '.next', '.nuxt', '.turbo', '.cache', '.venv', 'venv', '__pycache__', '.pnpm-store',
+  'worktrees', 'Pods', 'DerivedData', '.idea',
+  // 模板/夹具里也有叫 plan.md 的样板文件（技能模板、测试夹具），不是任务计划
+  'templates', 'template', 'fixtures', '__fixtures__', '__snapshots__',
+])
+/** 递归上限：深度 / 访问目录数 / 收集文件数——防巨型工作区把一次快照拖长。 */
+const PLAN_MAX_DEPTH = 6
+const PLAN_MAX_DIRS = 600
+const PLAN_MAX_FILES = 80
 /** untracked 单文件行数统计的大小上限（构建产物等大文件跳过）。 */
 const UNTRACKED_MAX_SIZE = 10 * 1024 * 1024
 /** untracked 行数统计并发。 */
@@ -302,8 +314,13 @@ export function runGit(args, cwd, timeoutMs) {
 }
 
 /**
- * 扫描工作区里的计划文档（agent 执行任务时写的 markdown 计划；
- * 约定位置：plans/、docs/plans/、.plans/ 一层 + 根 plan.md 等）。
+ * 扫描工作区里的计划文档（agent 执行任务时写的 markdown 计划）。
+ * 位置（**递归**，不再只扫工作区根的那一层）：
+ * - 约定文件：plan.md / PLAN.md / docs/plan.md，以及**任意层级**的同名 plan.md；
+ * - 约定目录：任意层级的 plans/ 与 .plans/ 子树 —— 其下 .md 全收。
+ * 有界：深度 PLAN_MAX_DEPTH / 目录数 PLAN_MAX_DIRS / 文件数 PLAN_MAX_FILES；
+ * 跳过依赖与构建产物目录、不追符号链接；每层先下钻「本身就是约定目录」的
+ * 分支，预算被巨型仓吃光时也先保住计划目录的召回。
  * 标题取文档首个 `# ` 行（读头 512B），缺省回退文件名。
  */
 export async function scanPlans(cwd) {
@@ -320,17 +337,38 @@ export async function scanPlans(cwd) {
         seen.add(id)
         found.push({ path: p, mtime: st.mtimeMs, base: name })
       }
-    } catch { /* 不存在跳过 */ }
+    } catch { /* 不存在/不可读跳过 */ }
   }
-  for (const rel of PLAN_DIRS) {
-    const dir = join(cwd, rel)
-    let names = []
-    try { names = await readdir(dir) } catch { continue }
-    for (const n of names) {
-      if (n.toLowerCase().endsWith('.md')) await push(dir, n)
+  for (const rel of PLAN_FILES) {
+    const segs = rel.split('/')
+    await push(join(cwd, ...segs.slice(0, -1)), segs[segs.length - 1] ?? rel)
+  }
+  let budget = PLAN_MAX_DIRS
+  const walk = async (dir, depth, insidePlan) => {
+    if (budget <= 0 || depth > PLAN_MAX_DEPTH || found.length >= PLAN_MAX_FILES) return
+    budget--
+    let entries
+    try { entries = await readdir(dir, { withFileTypes: true }) } catch { return }
+    const subdirs = []
+    for (const e of entries) {
+      if (e.isDirectory()) {
+        if (PLAN_SKIP_DIRS.has(e.name)) continue
+        subdirs.push(e.name)
+      } else if (insidePlan && /\.md$/i.test(e.name)) {
+        await push(dir, e.name)
+      } else if (/^plan\.md$/i.test(e.name)) {
+        // 任意层级的同名计划文件（与约定目录无关）
+        await push(dir, e.name)
+      }
+    }
+    // 约定目录优先下钻：预算有限时先保住 plans/ 的召回
+    subdirs.sort((a, b) => Number(PLAN_DIR_NAMES.has(b.toLowerCase())) - Number(PLAN_DIR_NAMES.has(a.toLowerCase())))
+    for (const name of subdirs) {
+      if (budget <= 0 || found.length >= PLAN_MAX_FILES) return
+      await walk(join(dir, name), depth + 1, insidePlan || PLAN_DIR_NAMES.has(name.toLowerCase()))
     }
   }
-  for (const rel of PLAN_FILES) await push(cwd, rel)
+  await walk(cwd, 1, false)
   found.sort((a, b) => b.mtime - a.mtime)
   const top = found.slice(0, PLAN_MAX)
   return Promise.all(top.map(async f => {
