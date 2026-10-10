@@ -21,7 +21,8 @@ dsh plugin --profile web add github:kkutysllb/dsh-plugins#dsh-git-panel
 装好后重启 web profile 即生效：出现「git 工作区」开关按钮（非 git 工作区
 置灰），页面内注册独立浮动面板——变更/工作位置/分支、提交或推送、比较分支
 外链、GitHub 管理（PR/Issue）、任务计划（递归扫任意层级的 plans/、.plans/ 与
-plan.md）；多窗口各自跟随自己的会话工作区。
+plan.md；**点击计划 → 原生右栏文档预览**，不再弹本机默认应用）；多窗口各自
+跟随自己的会话工作区。
 按钮锚点链（v1.1.0 起）：会话页落**会话头右上角席位**
 `conversation.session.header.corner`（行内 28px，与邻居 icon 按钮齐平；KCoder
 桌面壳把会话页头覆盖进自绘标题栏同一条带，席位正好在原生「编辑器选择 / SSH」

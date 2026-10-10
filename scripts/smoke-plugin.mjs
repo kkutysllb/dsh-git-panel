@@ -81,6 +81,11 @@ if (HAS_CLIENT) {
     && client.includes('isExpanded') && client.includes('toggleExpanded'))
   ok('原生右栏互斥：让位沿判定', client.includes('anySideOpen') && client.includes('applySidebarMutual'))
   ok('原生右栏几何兜底：浮层左移', client.includes('const panelRight =') && client.includes('applyGeometry'))
+  // 3d) 计划点击 → 原生右栏文档预览（三级链，末端才是系统默认应用）
+  ok('计划预览：原生右栏 openResource', client.includes("ctx.get('sidebarRight')") && client.includes('openResource'))
+  ok('计划预览：dsh-resource://file/ 地址构造', client.includes('dsh-resource://file/session/')
+    && client.includes('dsh-resource://file/absolute/'))
+  ok('计划预览：保留 open-plan 末端兜底', client.includes("api('open-plan'"))
 }
 
 // 4) cordis.patch.yml name 指向

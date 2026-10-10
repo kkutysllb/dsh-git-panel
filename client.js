@@ -633,9 +633,41 @@ window.__ModuleLoader__.load({
         attributeFilter: ['class', 'aria-selected', 'data-rightbar-collapsed', 'data-rightbar-fullscreen'],
       })
 
-      /* ---- 计划点击预览（软依赖三层）：
-         betterSidebar editor tab → server open-plan 系统默认应用 ---- */
+      /* ---- 计划点击预览（0.2.x 三级链） ----
+       * ① **原生右栏文档预览**（首选）：ctx.sidebarRight.openResource(address)。
+       *    address 用 dsh-resource://file/… 语法（ui-sidebar-documentpreview 的
+       *    pattern 收 dsh-resource://file/**）：路径在会话工作区内 → session 域
+       *    （与 shell 里点文件引用同一形态）；在区外（如 worktree 覆盖）或取不到
+       *    会话 → absolute 域。openResource 会在同一步展开右栏，本面板按互斥让位
+       *    （data-rightbar-collapsed 沿）自动收起，预览关掉后履约回开——不再弹
+       *    本机默认应用。
+       * ② KCoder 老宿主 betterSidebar editor tab（该产品已退役该面板，保留兼容）；
+       * ③ server open-plan → 系统默认应用（末端兜底，仅前两级都不可用时走）。 */
+      const fileAddressOf = (absPath) => {
+        const encode = (seg) => encodeURIComponent(seg).replace(/%3A/gi, ':')
+        const normalized = String(absPath).replace(/\\/g, '/')
+        const cwd = effectiveCwd()
+        const id = currentSessionId()
+        const root = typeof cwd === 'string' ? cwd.replace(/\\/g, '/').replace(/\/+$/, '') : ''
+        if (id !== null && root !== '' && normalized.startsWith(root + '/')) {
+          const rel = normalized.slice(root.length + 1)
+          return 'dsh-resource://file/session/' + encode(id) + '/' + rel.split('/').map(encode).join('/')
+        }
+        const unc = normalized.startsWith('//')
+        const body = normalized.replace(/^\/+/, '')
+        return 'dsh-resource://file/absolute/' + (unc ? '/' : '') + body.split('/').map(encode).join('/')
+      }
+      const openInNativeSidebar = (plan) => {
+        let sidebar = null
+        try { sidebar = ctx.get('sidebarRight') ?? null } catch { return false }
+        if (sidebar === null || typeof sidebar.openResource !== 'function') return false
+        try {
+          sidebar.openResource(fileAddressOf(plan.path))
+          return true
+        } catch { return false /* 地址无类型认领/右栏不可用 → 落下一级 */ }
+      }
       const openPlan = (plan) => {
+        if (openInNativeSidebar(plan)) return
         let sidebar = null
         try { sidebar = ctx.get('betterSidebar') ?? null } catch { sidebar = null }
         if (sidebar !== null && typeof sidebar.openTab === 'function') {
